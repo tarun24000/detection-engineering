@@ -1,0 +1,43 @@
+// ---
+// name: RC4 Kerberos Encryption Downgrade (AS-REP / TGS)
+// description: Detects Kerberoasting and AS-REP roasting attacks where adversaries request Kerberos tickets using weak RC4 (ARCFOUR-HMAC-MD5) encryption instead of AES256. RC4 tickets can be cracked offline significantly faster than AES tickets.
+// mitre_technique: T1558.003
+// mitre_tactic: Credential Access
+// severity: High
+// data_sources: SecurityEvent
+// author: Tarun Wagjiani
+// date: 2025-01-30
+// ---
+
+SecurityEvent
+| where EventID in (4769, 4768)
+| extend
+    TicketEncryptionType = tostring(EventData.TicketEncryptionType),
+    ServiceName = tostring(EventData.ServiceName),
+    TargetUserName = tostring(EventData.TargetUserName),
+    IpAddress = tostring(EventData.IpAddress),
+    TicketOptions = tostring(EventData.TicketOptions),
+    Status = tostring(EventData.Status)
+| where TicketEncryptionType == "0x17"  // RC4-HMAC
+| where Status == "0x0"                  // Success only
+| where ServiceName !endswith "$"        // Exclude machine accounts
+| where ServiceName !in~ ("krbtgt", "ANONYMOUS LOGON")
+| summarize
+    RC4RequestCount = count(),
+    DistinctServices = dcount(ServiceName),
+    TargetedServices = make_set(ServiceName, 20),
+    SourceIPs = make_set(IpAddress, 10)
+    by TargetUserName, bin(TimeGenerated, 5m)
+| where RC4RequestCount > 3
+| extend
+    ThreatDescription = "RC4 Kerberos ticket requests detected — potential Kerberoasting or AS-REP roasting in progress",
+    MITRETechnique = "T1558.003 — Steal or Forge Kerberos Tickets: Kerberoasting"
+| project
+    TimeGenerated,
+    TargetUserName,
+    RC4RequestCount,
+    DistinctServices,
+    TargetedServices,
+    SourceIPs,
+    ThreatDescription,
+    MITRETechnique

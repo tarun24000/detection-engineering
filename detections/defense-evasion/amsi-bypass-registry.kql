@@ -1,0 +1,31 @@
+// ---
+// name: AMSI Bypass via Registry Key Modification
+// description: Detects modification of the AMSI registry key used to disable AMSI scanning. Adversaries set AmsiEnable=0 under HKCU to silently disable script-block logging and AMSI inspection for the current user session.
+// mitre_technique: T1562.001
+// mitre_tactic: Defense Evasion
+// severity: High
+// data_sources: DeviceRegistryEvents
+// author: Tarun Wagjiani
+// date: 2025-01-15
+// ---
+
+DeviceRegistryEvents
+| where ActionType == "RegistryValueSet"
+| where RegistryKey has_any (
+    @"HKEY_CURRENT_USER\Software\Microsoft\Windows Script\Settings",
+    @"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows Script\Settings"
+)
+| where RegistryValueName == "AmsiEnable"
+| where RegistryValueData == "0"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData
+| extend
+    ThreatDescription = "AMSI disabled via registry — script scanning suppressed for current session",
+    MITRETechnique = "T1562.001 — Impair Defenses: Disable or Modify Tools"

@@ -1,0 +1,39 @@
+// ---
+// name: User Added to Conditional Access Policy Exclusion
+// description: Detects when a user account is added to an exclusion list within a Conditional Access policy. Adversaries use this technique to exempt a compromised account from MFA or compliant device requirements, enabling persistent access without security controls.
+// mitre_technique: T1556.006
+// mitre_tactic: Persistence
+// severity: High
+// data_sources: AuditLogs
+// author: Tarun Wagjiani
+// date: 2025-03-05
+// ---
+
+AuditLogs
+| where OperationName in (
+    "Update conditional access policy",
+    "Add conditional access policy"
+)
+| where Result == "success"
+| extend
+    PolicyName = tostring(TargetResources[0].displayName),
+    ModifiedBy = tostring(InitiatedBy.user.userPrincipalName),
+    ModifiedByIP = tostring(InitiatedBy.user.ipAddress),
+    OldValue = tostring(TargetResources[0].modifiedProperties[0].oldValue),
+    NewValue = tostring(TargetResources[0].modifiedProperties[0].newValue)
+| where NewValue has "excludeUsers"
+      or NewValue has "excludeGroups"
+| extend
+    ExclusionAdded = NewValue !has OldValue
+| where ExclusionAdded == true
+      or (strlen(NewValue) > strlen(OldValue) and NewValue has "exclude")
+| project
+    TimeGenerated,
+    PolicyName,
+    ModifiedBy,
+    ModifiedByIP,
+    OldValue,
+    NewValue
+| extend
+    ThreatDescription = "User or group added to Conditional Access exclusion — MFA or device compliance may be bypassed for targeted account",
+    MITRETechnique = "T1556.006 — Modify Authentication Process: Multi-Factor Authentication"

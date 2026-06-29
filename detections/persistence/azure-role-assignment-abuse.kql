@@ -1,0 +1,51 @@
+// ---
+// name: Privileged Azure Role Assignment Outside Approved Workflow
+// description: Detects high-privilege Azure RBAC role assignments (Owner, Contributor, User Access Administrator) made outside of expected service principals or approved IAM automation accounts. Commonly used by adversaries to establish persistent cloud access post-compromise.
+// mitre_technique: T1098.003
+// mitre_tactic: Persistence
+// severity: Critical
+// data_sources: AuditLogs
+// author: Tarun Wagjiani
+// date: 2025-02-14
+// ---
+
+let HighPrivilegeRoles = dynamic([
+    "Owner",
+    "Contributor",
+    "User Access Administrator",
+    "Privileged Role Administrator",
+    "Global Administrator"
+]);
+
+let ApprovedServicePrincipals = dynamic([
+    "ServicePrincipalName1",
+    "TerraformSP",
+    "AzureDevOpsSP"
+]);
+
+AuditLogs
+| where OperationName == "Add member to role"
+| extend
+    AssignedRole = tostring(TargetResources[0].modifiedProperties
+        | where Name == "Role.DisplayName"
+        | project tostring(newValue)
+        | take 1),
+    AssignedTo = tostring(TargetResources[0].userPrincipalName),
+    AssignedToType = tostring(TargetResources[0].type),
+    AssignedBy = tostring(InitiatedBy.user.userPrincipalName),
+    AssignedByIP = tostring(InitiatedBy.user.ipAddress),
+    AssignedBySP = tostring(InitiatedBy.app.displayName)
+| where AssignedRole in (HighPrivilegeRoles)
+| where AssignedBySP !in (ApprovedServicePrincipals)
+| project
+    TimeGenerated,
+    AssignedRole,
+    AssignedTo,
+    AssignedToType,
+    AssignedBy,
+    AssignedBySP,
+    AssignedByIP,
+    CorrelationId
+| extend
+    ThreatDescription = "High-privilege Azure role assigned outside approved workflow — potential persistence via cloud RBAC abuse",
+    MITRETechnique = "T1098.003 — Account Manipulation: Additional Cloud Roles"

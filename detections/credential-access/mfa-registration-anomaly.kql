@@ -1,0 +1,45 @@
+// ---
+// name: Anomalous MFA Method Registration
+// description: Detects MFA method registrations from unfamiliar locations or outside business hours, which may indicate adversary MFA registration following account compromise (AiTM phishing). Relevant after session token theft where attacker registers their own authenticator.
+// mitre_technique: T1098.005
+// mitre_tactic: Credential Access
+// severity: High
+// data_sources: AuditLogs, SigninLogs
+// author: Tarun Wagjiani
+// date: 2025-04-10
+// ---
+
+let KnownHours = range(8, 18, 1);  // Adjust to business hours per tenant
+
+AuditLogs
+| where OperationName in (
+    "User registered security info",
+    "User registered all required security info",
+    "Admin registered security info for a user"
+)
+| extend
+    UPN = tostring(InitiatedBy.user.userPrincipalName),
+    RegistrationIP = tostring(InitiatedBy.user.ipAddress),
+    AuthMethodType = tostring(TargetResources[0].modifiedProperties[0].newValue),
+    ResultReason = ResultDescription
+| where ResultType == "Success"
+| extend RegistrationHour = datetime_part("Hour", TimeGenerated)
+| extend IsOutOfHours = RegistrationHour !in (KnownHours)
+| join kind=leftouter (
+    SigninLogs
+    | where TimeGenerated > ago(7d)
+    | summarize KnownIPs = make_set(IPAddress, 50) by UserPrincipalName
+) on $left.UPN == $right.UserPrincipalName
+| extend IsNewIP = RegistrationIP !in (KnownIPs)
+| where IsOutOfHours == true or IsNewIP == true
+| project
+    TimeGenerated,
+    UPN,
+    RegistrationIP,
+    AuthMethodType,
+    IsOutOfHours,
+    IsNewIP,
+    ResultReason
+| extend
+    ThreatDescription = "MFA method registered from new IP or outside business hours — possible post-AiTM account takeover",
+    MITRETechnique = "T1098.005 — Account Manipulation: Device Registration"

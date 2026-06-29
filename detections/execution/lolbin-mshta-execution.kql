@@ -1,0 +1,38 @@
+// ---
+// name: Suspicious MSHTA LOLBin Execution
+// description: Detects mshta.exe executing remote or encoded payloads — a common technique used by TA505, Lazarus, and commodity loaders to bypass application whitelisting and execute malicious HTA content.
+// mitre_technique: T1218.005
+// mitre_tactic: Execution
+// severity: High
+// data_sources: DeviceProcessEvents
+// author: Tarun Wagjiani
+// date: 2025-02-08
+// ---
+
+DeviceProcessEvents
+| where FileName =~ "mshta.exe"
+| where ProcessCommandLine has_any (
+    "http://",
+    "https://",
+    "vbscript:",
+    "javascript:",
+    "script:",
+    ".hta"
+)
+| where ProcessCommandLine !has "C:\\Windows\\System32\\mshta.exe"
+      or ProcessCommandLine has_any ("http", "https", "vbscript", "javascript")
+| extend
+    IsRemoteExecution = ProcessCommandLine has_any ("http://", "https://"),
+    IsEncodedExecution = ProcessCommandLine has_any ("vbscript:", "javascript:")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    ProcessCommandLine,
+    FolderPath,
+    IsRemoteExecution,
+    IsEncodedExecution
+| extend
+    ThreatDescription = "MSHTA executing remote or script-embedded payload — common LOLBin abuse for initial execution",
+    MITRETechnique = "T1218.005 — System Binary Proxy Execution: Mshta"

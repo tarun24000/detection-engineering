@@ -1,0 +1,40 @@
+// ---
+// name: ClickFix WebDAV Payload Delivery via RunDLL32
+// description: Detects the ClickFix social engineering technique where victims are tricked into running a msiexec or rundll32 command that fetches a payload from an attacker-controlled WebDAV share. Observed in the wild against multiple financial services tenants in 2024-2025.
+// mitre_technique: T1218.011
+// mitre_tactic: Execution
+// severity: Critical
+// data_sources: DeviceProcessEvents, DeviceNetworkEvents
+// author: Tarun Wagjiani
+// date: 2025-03-22
+// ---
+
+let SuspiciousWebDAVExecution = DeviceProcessEvents
+| where FileName in~ ("rundll32.exe", "msiexec.exe", "regsvr32.exe")
+| where ProcessCommandLine has_any ("\\\\", "WebClient", "/i:http", "davwwwroot")
+| where ProcessCommandLine matches regex @"\\\\[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
+      or ProcessCommandLine has "davwwwroot"
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    ProcessName = FileName,
+    CommandLine = ProcessCommandLine,
+    InitiatingProcess = InitiatingProcessFileName;
+
+let WebDAVConnections = DeviceNetworkEvents
+| where InitiatingProcessFileName in~ ("svchost.exe")
+| where RemotePort in (80, 443, 445)
+| where RemoteUrl has_any ("davwwwroot", "\\\\")
+| project
+    Timestamp,
+    DeviceName,
+    RemoteIP,
+    RemoteUrl,
+    RemotePort;
+
+SuspiciousWebDAVExecution
+| join kind=leftouter WebDAVConnections on DeviceName
+| extend
+    ThreatDescription = "ClickFix-style WebDAV payload delivery — adversary hosting DLL/MSI on attacker WebDAV share",
+    MITRETechnique = "T1218.011 — System Binary Proxy Execution: Rundll32"
